@@ -1,11 +1,3 @@
-from docx import Document
-import os
-
-# Create a Word document with the code content from the 3 - Voice file
-doc = Document()
-doc.add_heading('3 - Voice (voice.js)', level=1)
-
-code_content = """
 // voice.js
 
 let synth = window.speechSynthesis;
@@ -21,7 +13,7 @@ if (typeof speechSynthesis !== "undefined") {
   loadVoices();
 }
 
-export function speak(text) {
+function speakText(text) {
   if (!synth || !text) return;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.voice = selectedVoice;
@@ -30,12 +22,5 @@ export function speak(text) {
   synth.cancel();
   synth.speak(utterance);
 }
-"""
 
-doc.add_paragraph(code_content)
-
-# Save the document
-file_path = "/mnt/data/3 - Voice (voice.js).docx"
-doc.save(file_path)
-
-file_path
+window.speakText = speakText;
