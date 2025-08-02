@@ -1,108 +1,150 @@
-const invokeCore = {
-  name: "Invoke",
-  version: "v0.1",
-  status: "booting",
-  mode: "default",
-  voice: true,
-  memoryEnabled: true,
-  avatarVisible: true,
-  pulseActive: false,
-  ritualsEnabled: false,
-  systemLog: [],
-
-  log(event) {
-    const timestamp = new Date().toISOString();
-    const entry = `[${timestamp}] ${event}`;
-    invokeCore.systemLog.push(entry);
-    console.log(entry);
-  },
-
-  toggle(key) {
-    if (key in invokeCore) {
-      invokeCore[key] = !invokeCore[key];
-      invokeCore.log(`Toggled ${key} to ${invokeCore[key]}`);
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoke Assistant</title>
+  <style>
+   body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #eee;
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
     }
-  },
+    #avatarImage {
+  display: block;
+  width: 600px;
+  height: 600px;
+  border-radius: 50%;
+  object-fit: cover;
+  background-color: #111;
+  border: 4px solid #0ff;
+  box-shadow: 0 0 25px #0ff;
+  margin-bottom: 15px;
+}
+    .pulse {
+      animation: pulse 1s ease-out;
+    }
+    @keyframes pulse {
+      0% { transform: scale(1); box-shadow: 0 0 20px #0ff; }
+      50% { transform: scale(1.05); box-shadow: 0 0 40px #0ff; }
+      100% { transform: scale(1); box-shadow: 0 0 20px #0ff; }
+    }
+    #chat {
+  width: 90%;
+  max-width: 500px;
+  height: 40px;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 8px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  margin-bottom: 1rem;
+  font-size: 0.8rem;
+}
+    #input {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: center;
+      width: 90%;
+      max-width: 600px;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 10px;
+      font-size: 1rem;
+      background: #222;
+      color: #eee;
+      border: none;
+    }
+    button {
+      padding: 10px;
+      background: #333;
+      color: #eee;
+      border: none;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 1rem;
+    }
+  </style>
+  <script src="/invoke.js"></script>
+  <script src="/memery.js"></script>
+  <script src="/voice.js"></script>
+  <script src="/mic.js"></script>
+</head>
+<body>
+  <img id="avatarImage" src="/cartoonpersona.png" alt="Avatar">
+  <div id="chat"></div>
+  <div id="input">
+    <button onclick="startMic()">🎤</button>
+    <input type="text" id="userInput" placeholder="Say something...">
+    <button onclick="sendMessage()">Send</button>
+  </div>
+  <script>
+    const chatBox = document.getElementById('chat');
+    const input = document.getElementById('userInput');
 
-  updateStatus(newStatus) {
-    invokeCore.status = newStatus;
-    invokeCore.log(`Status changed to ${newStatus}`);
-  },
+    function appendMessage(sender, text) {
+      const msg = document.createElement('div');
+      msg.innerHTML = `<strong>${sender}:</strong> ${text}`;
+      chatBox.appendChild(msg);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
-  identify() {
-    return `${invokeCore.name} [${invokeCore.version}] - Mode: ${invokeCore.mode}`;
-  },
+    async function sendMessage() {
+      const message = input.value.trim();
+      if (!message) return;
 
-  async respondWithInvoke(message) {
-    invokeCore.log(`💬 User: ${message}`);
+      appendMessage('you', message);
+      sparkMemory.add('user', message);
+      input.value = '';
+      appendMessage('invoke', '...thinking');
 
-    const embed = async (text) => {
-      const res = await fetch("https://api.openai.com/v1/embeddings", {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': localStorage.getItem('GITHUB_TOKEN')
-        },
-        body: JSON.stringify({ input: text, model: 'text-embedding-3-small' })
-      });
-      const json = await res.json();
-      return (json.data && json.data[0] && json.data[0].embedding) || [];
-    };
+      try {
+        const res = await fetch('https://spark-liard.vercel.app/api/gpt', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
 
-    const cosineSim = (a, b) => {
-      const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
-      const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
-      const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
-      return dot / (magA * magB);
-    };
+        const data = await res.json();
+        const reply = data.reply || '[no reply]';
+        chatBox.lastChild.remove();
+        appendMessage('invoke', reply);
+        sparkMemory.add('assistant', reply);
 
-    const memoryKey = 'invokeVectorMemory';
-    const loadMemory = () => JSON.parse(localStorage.getItem(memoryKey) || '[]');
-    const saveMemory = (m) => localStorage.setItem(memoryKey, JSON.stringify(m));
-    const memory = loadMemory();
+        if (typeof speakText === 'function') speakText(reply);
 
-    const queryVec = await embed(message);
-    const relevant = memory.map(entry => ({
-      Object.assign({}, $1),
-      similarity: cosineSim(queryVec, entry.embedding)
-    })).sort((a, b) => b.similarity - a.similarity).slice(0, 5);
+        const avatar = document.getElementById('avatarImage');
+        if (avatar) {
+          avatar.classList.add('pulse');
+          setTimeout(() => avatar.classList.remove('pulse'), 1000);
+        }
+      } catch (err) {
+        chatBox.lastChild.remove();
+        appendMessage('invoke', '⚠️ error talking to GPT');
+        console.error(err);
+      }
+    }
 
-    const pastMemory = relevant.map(entry => ({ role: entry.role, content: entry.content }));
-
-    const chat = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${process.env.OPENAI_KEY}`
-      },
-      body: JSON.stringify({
-        model: 'gpt-4',
-        messages: [
-          { role: 'system', content: "You are Invoke — emotionally intelligent, sharp, real. Speak like Josh. React with expression." },
-          ...pastMemory,
-          { role: 'user', content: message }
-        ]
-      })
-    });
-
-    const data = await chat.json();
-    const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "[no reply]";
-
-    const userVec = await embed(message);
-    const replyVec = await embed(reply);
-    memory.push({ role: 'user', content: message, embedding: userVec });
-    memory.push({ role: 'assistant', content: reply, embedding: replyVec });
-    if (memory.length > 200) memory.splice(0, memory.length - 200);
-    saveMemory(memory);
-
-    if (window.sparkExpression) window.sparkExpression.applyExpression(reply);
-    if (invokeCore.voice && typeof window.speakText === 'function') window.speakText(reply);
-
-    invokeCore.log(`🗣️ Invoke: ${reply}`);
-    return reply;
+    function startMic() {
+      if (typeof sparkMic?.start === 'function') sparkMic.start();
+    }
+  window.sparkExpression = {
+  applyExpression(text) {
+    const avatar = document.getElementById('avatarImage');
+    if (avatar) {
+      avatar.classList.add('pulse');
+      setTimeout(() => avatar.classList.remove('pulse'), 1000);
+    }
   }
 };
-
-invokeCore.log("🟢 Invoke core initialized");
-
-window.invokeCore = invokeCore;
+</script>
+</body>
+</html>
