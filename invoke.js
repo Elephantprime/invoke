@@ -1,99 +1,108 @@
-// Full Core Build for Spark Assistant - Safe for Vercel
-const CONFIG = {
-  OPENAI_KEY: '', // Set in Vercel ENV
-  MEMORY_GIST_ID: '', // e.g., a82bbc4a0df2f2c9d1b0955a8d1fc315
-  GITHUB_TOKEN: '', // Set in ENV
-  MODEL: 'gpt-4o'
+const invokeCore = {
+  name: "Invoke",
+  version: "v0.1",
+  status: "booting",
+  mode: "default",
+  voice: true,
+  memoryEnabled: true,
+  avatarVisible: true,
+  pulseActive: false,
+  ritualsEnabled: false,
+  systemLog: [],
+
+  log(event) {
+    const timestamp = new Date().toISOString();
+    const entry = `[${timestamp}] ${event}`;
+    invokeCore.systemLog.push(entry);
+    console.log(entry);
+  },
+
+  toggle(key) {
+    if (key in invokeCore) {
+      invokeCore[key] = !invokeCore[key];
+      invokeCore.log(`Toggled ${key} to ${invokeCore[key]}`);
+    }
+  },
+
+  updateStatus(newStatus) {
+    invokeCore.status = newStatus;
+    invokeCore.log(`Status changed to ${newStatus}`);
+  },
+
+  identify() {
+    return `${invokeCore.name} [${invokeCore.version}] - Mode: ${invokeCore.mode}`;
+  },
+
+  async respondWithInvoke(message) {
+    invokeCore.log(`💬 User: ${message}`);
+
+    const embed = async (text) => {
+      const res = await fetch("https://api.openai.com/v1/embeddings", {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': localStorage.getItem('GITHUB_TOKEN')
+        },
+        body: JSON.stringify({ input: text, model: 'text-embedding-3-small' })
+      });
+      const json = await res.json();
+      return (json.data && json.data[0] && json.data[0].embedding) || [];
+    };
+
+    const cosineSim = (a, b) => {
+      const dot = a.reduce((sum, val, i) => sum + val * b[i], 0);
+      const magA = Math.sqrt(a.reduce((sum, val) => sum + val * val, 0));
+      const magB = Math.sqrt(b.reduce((sum, val) => sum + val * val, 0));
+      return dot / (magA * magB);
+    };
+
+    const memoryKey = 'invokeVectorMemory';
+    const loadMemory = () => JSON.parse(localStorage.getItem(memoryKey) || '[]');
+    const saveMemory = (m) => localStorage.setItem(memoryKey, JSON.stringify(m));
+    const memory = loadMemory();
+
+    const queryVec = await embed(message);
+    const relevant = memory.map(entry => ({
+      Object.assign({}, $1),
+      similarity: cosineSim(queryVec, entry.embedding)
+    })).sort((a, b) => b.similarity - a.similarity).slice(0, 5);
+
+    const pastMemory = relevant.map(entry => ({ role: entry.role, content: entry.content }));
+
+    const chat = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${process.env.OPENAI_KEY}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4',
+        messages: [
+          { role: 'system', content: "You are Invoke — emotionally intelligent, sharp, real. Speak like Josh. React with expression." },
+          ...pastMemory,
+          { role: 'user', content: message }
+        ]
+      })
+    });
+
+    const data = await chat.json();
+    const reply = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) || "[no reply]";
+
+    const userVec = await embed(message);
+    const replyVec = await embed(reply);
+    memory.push({ role: 'user', content: message, embedding: userVec });
+    memory.push({ role: 'assistant', content: reply, embedding: replyVec });
+    if (memory.length > 200) memory.splice(0, memory.length - 200);
+    saveMemory(memory);
+
+    if (window.sparkExpression) window.sparkExpression.applyExpression(reply);
+    if (invokeCore.voice && typeof window.speakText === 'function') window.speakText(reply);
+
+    invokeCore.log(`🗣️ Invoke: ${reply}`);
+    return reply;
+  }
 };
 
-let memory = [];
+invokeCore.log("🟢 Invoke core initialized");
 
-async function loadMemory() {
-  try {
-    const res = await fetch(`https://gist.githubusercontent.com/Elephantprime/${CONFIG.MEMORY_GIST_ID}/raw`, {
-      headers: { Authorization: `Bearer ${CONFIG.GITHUB_TOKEN}` }
-    });
-    memory = await res.json();
-  } catch {
-    memory = [];
-  }
-}
-
-async function saveMemory() {
-  await fetch(`https://api.github.com/gists/${CONFIG.MEMORY_GIST_ID}`, {
-    method: 'PATCH',
-    headers: {
-      Authorization: `Bearer ${CONFIG.GITHUB_TOKEN}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      files: {
-        'memory.json': { content: JSON.stringify(memory, null, 2) }
-      }
-    })
-  });
-}
-
-function addToMemory(entry) {
-  memory.push({ timestamp: Date.now(), entry });
-  if (memory.length > 100) memory.shift();
-  saveMemory();
-}
-
-async function fetchGPT(prompt) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${CONFIG.OPENAI_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: CONFIG.MODEL,
-      messages: [
-        { role: 'system', content: 'You are Spark, a memory-aware assistant with voice and agency.' },
-        ...memory.map(m => ({ role: 'user', content: m.entry })),
-        { role: 'user', content: prompt }
-      ]
-    })
-  });
-  const data = await res.json();
-  return data.choices?.[0]?.message?.content || 'Error: no response.';
-}
-
-function speak(text) {
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.rate = 1;
-  utter.pitch = 1;
-  speechSynthesis.speak(utter);
-}
-
-function buildUI() {
-  document.body.innerHTML = `
-    <style>
-      body { background: #111; color: #0f0; font-family: monospace; padding: 2rem; }
-      textarea, button { width: 100%; margin-top: 1rem; background: #000; color: #0f0; border: 1px solid #0f0; padding: 1rem; font-size: 1rem; }
-      #output { margin-top: 2rem; white-space: pre-wrap; }
-    </style>
-    <textarea id="input" placeholder="Talk to Spark..."></textarea>
-    <button onclick="handleInput()">Speak 🔥</button>
-    <div id="output"></div>
-  `;
-}
-
-async function handleInput() {
-  const input = document.getElementById('input').value.trim();
-  if (!input) return;
-  addToMemory(input);
-  const response = await fetchGPT(input);
-  document.getElementById('output').textContent = response;
-  speak(response);
-}
-
-(async () => {
-  if (!CONFIG.OPENAI_KEY || !CONFIG.GITHUB_TOKEN || !CONFIG.MEMORY_GIST_ID) {
-    document.body.innerHTML = '<h1 style="color:red">Missing ENV vars. Set in Vercel dashboard.</h1>';
-    return;
-  }
-  await loadMemory();
-  buildUI();
-})();
+window.invokeCore = invokeCore;
